@@ -1,56 +1,213 @@
-import struct
-import serial
-from protocols import *
+import math
+import sys
+import threading
 
-import struct
-import serial
-from protocols import *
+import numpy as np
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
+    QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem, QGraphicsPolygonItem, QGraphicsRectItem,
+    QGraphicsLineItem
+)
+from PyQt5.QtGui import QBrush, QColor, QPolygonF, QPen
+from PyQt5.QtCore import QTimer, QPointF, Qt
+import pyqtgraph as pg
+from SerParse import *
+
+class ValveSymbol(QGraphicsPolygonItem):
+    def __init__(self, center_x, center_y, orientation='horizontal'):
+        super().__init__()
+
+        size = 30
+        if orientation == 'horizontal':
+            triangle1 = QPolygonF([
+                QPointF(center_x, center_y),
+                QPointF(center_x - size, center_y - size),
+                QPointF(center_x - size, center_y + size)
+            ])
+            triangle2 = QPolygonF([
+                QPointF(center_x, center_y),
+                QPointF(center_x + size, center_y - size),
+                QPointF(center_x + size, center_y + size)
+            ])
+        else:
+            triangle1 = QPolygonF([
+                QPointF(center_x, center_y),
+                QPointF(center_x - size, center_y - size),
+                QPointF(center_x + size, center_y - size)
+            ])
+            triangle2 = QPolygonF([
+                QPointF(center_x, center_y),
+                QPointF(center_x - size, center_y + size),
+                QPointF(center_x + size, center_y + size)
+            ])
+
+        self.triangle1_item = QGraphicsPolygonItem(triangle1)
+        self.triangle2_item = QGraphicsPolygonItem(triangle2)
+        self.triangle1_item.setBrush(QBrush(QColor("gray")))
+        self.triangle2_item.setBrush(QBrush(QColor("gray")))
+
+    def add_to_scene(self, scene):
+        scene.addItem(self.triangle1_item)
+        scene.addItem(self.triangle2_item)
+
+    def toggle_color(self):
+        current_color = self.triangle1_item.brush().color().name()
+        new_color = "green" if current_color == "#808080" else "gray"
+        self.triangle1_item.setBrush(QBrush(QColor(new_color)))
+        self.triangle2_item.setBrush(QBrush(QColor(new_color)))
 
 
-def parse_packet(packet: bytes):
-    prot = RegularExchangeProtocol()
+class PumpSymbol(QGraphicsRectItem):
+    def __init__(self, center_x, center_y):
+        size = 40
+        super().__init__(center_x - size / 2, center_y - size / 2, size, size)
+        self.setBrush(QBrush(QColor("lightblue")))
 
-    len1byte = int.from_bytes(packet[1], 'little')
-    len4byte = int.from_bytes(packet[2], 'little')
+        circle = QGraphicsEllipseItem(center_x - size / 4, center_y - size / 4, size / 2, size / 2)
+        circle.setBrush(QBrush(QColor("blue")))
+        self.circle = circle
 
-    # 1-байтные поля
-    dt1byte = []
-    for i in range(len1byte):
-        dt1byte.append(packet[3 + i])
-
-    prot.set_ForVacuumState(dt1byte[0])
-    prot.set_TMNState(dt1byte[1])
-    prot.set_DU16(dt1byte[2])
-    prot.set_DU63(dt1byte[3])
-    prot.set_ElectroValveState(dt1byte[4])
-    prot.set_Mode(dt1byte[5])
-
-    # 4-байтные поля
-    dt4byte = []
-    for i in range(len4byte):
-        dt4byte.append(packet[3 + len1byte + i * 4: 3 + len1byte + i * 4 + 4])
-
-    prot.set_TMNrpm(int.from_bytes(dt4byte[0], 'little'))
-    prot.set_MIDA(struct.unpack('<f', dt4byte[1])[0])
-    prot.set_Magdischarge(struct.unpack('<f', dt4byte[2])[0])
-    prot.set_TEMP1(struct.unpack('<f', dt4byte[3])[0])
-    prot.set_TEMP2(struct.unpack('<f', dt4byte[4])[0])
-    prot.set_Analogexit(struct.unpack('<f', dt4byte[5])[0])
+    def add_to_scene(self, scene):
+        scene.addItem(self)
+        scene.addItem(self.circle)
 
 
-def main():
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    sync_byte = 0xAA
+class VacuumGauge:
+    def __init__(self, center_x, center_y, radius=30):
+        self.center_x = center_x
+        self.center_y = center_y
+        self.radius = radius
 
-    while True:
-        # Ожидание байта синхронизации
-        byte = ser.read(1)
-        if not byte:
-            continue
+        # Круг вакууметра
+        self.circle = QGraphicsEllipseItem(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
+        self.circle.setPen(QPen(Qt.black, 2))
 
-        if byte[0] == sync_byte:
-            packet = byte + ser.read(32)  # уже прочитали 1 байт, читаем оставшиеся
-            parse_packet(packet)
+        # Стрелка
+        self.arrow = QGraphicsLineItem()
+        self.arrow.setPen(QPen(Qt.red, 2))
+        self.set_angle(0)  # начальный угол
+
+    def set_angle(self, angle_deg):
+        # Угол в градусах, 0 = вправо, 90 = вверх
+        angle_rad = math.radians(angle_deg)
+        end_x = self.center_x + self.radius * math.cos(angle_rad)
+        end_y = self.center_y - self.radius * math.sin(angle_rad)
+        self.arrow.setLine(self.center_x, self.center_y, end_x, end_y)
+
+    def add_to_scene(self, scene):
+        scene.addItem(self.circle)
+        scene.addItem(self.arrow)
+
+
+class SchematicWidget(QGraphicsView):
+    def __init__(self):
+        super().__init__()
+        self.scene = QGraphicsScene()
+        self.setScene(self.scene)
+        self.setSceneRect(0, 0, 400, 400)
+
+        # Используем символ клапана
+        self.valve_item = ValveSymbol(200, 200, orientation='horizontal')
+        self.valve_item.add_to_scene(self.scene)
+
+        # Добавим насос
+        self.pump_item = PumpSymbol(100, 100)
+        self.pump_item.add_to_scene(self.scene)
+
+        self.vacuum_gauge = VacuumGauge(300, 100)
+        self.vacuum_gauge.add_to_scene(self.scene)
+
+    def toggle_valve(self):
+        self.valve_item.toggle_color()
+
+
+class GraphPanel(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        self.plots = []
+        self.curves = []
+        self.vlines = []
+        self.data = []
+
+        for i in range(3):
+            plot = pg.PlotWidget()
+            curve = plot.plot(np.zeros(100), pen='g')
+            vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('r', width=1.5))
+            plot.addItem(vline)
+
+            self.plots.append(plot)
+            self.curves.append(curve)
+            self.vlines.append(vline)
+            self.data.append(np.zeros(100))
+            layout.addWidget(plot)
+
+        self.current_index = 0
+        self.mark_requested = False
+
+    def update_plots(self, actual_data):
+        if self.current_index > 0:
+            self.current_index -= 1
+        for i in range(3):
+            self.data[i] = np.roll(self.data[i], -1)
+            self.data[i][-1] = actual_data[i]
+            self.curves[i].setData(self.data[i])
+            if self.current_index:
+                self.vlines[i].setValue(self.current_index)
+
+    def mark_event(self):
+        self.mark_requested = True
+        self.current_index = 100  # Сброс позиции метки, чтобы она шла с начала данных
+
+
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("SCADA NIIM")
+        self.setGeometry(100, 100, 1200, 800)
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_layout = QHBoxLayout()
+        self.setLayout(main_layout)
+
+        # === Block 1: Control Panel with Scroll ===
+        control_panel = QWidget()
+        control_layout = QVBoxLayout()
+        control_panel.setLayout(control_layout)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(control_panel)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFixedWidth(200)
+
+        self.valve_button = QPushButton("Открыть клапан")
+        self.valve_button.clicked.connect(self.toggle_valve)
+        control_layout.addWidget(self.valve_button)
+
+        # === Block 2: Schematic Widget ===
+        self.schematic = SchematicWidget()
+
+        # === Block 3: Graph Panel with 4 Graphs ===
+        self.graph_panel = GraphPanel()
+
+        # Add blocks to main layout
+        main_layout.addWidget(scroll_area)
+        main_layout.addWidget(self.schematic, stretch=2)
+        main_layout.addWidget(self.graph_panel, stretch=1)
+
+    def toggle_valve(self):
+        self.schematic.toggle_valve()
+        self.graph_panel.mark_event()
+
 
 if __name__ == "__main__":
-    main()
+    reader_thread = threading.Thread(target=mai, daemon=True)
+    reader_thread.start()
+
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.showFullScreen()
+    sys.exit(app.exec_())
