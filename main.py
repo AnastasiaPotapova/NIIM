@@ -12,6 +12,7 @@ from PyQt5.QtGui import QBrush, QColor, QPolygonF, QPen
 from PyQt5.QtCore import QTimer, QPointF, Qt
 import pyqtgraph as pg
 from SerParse import *
+from SerialWorker import *
 
 class ValveSymbol(QGraphicsPolygonItem):
     def __init__(self, center_x, center_y, orientation='horizontal'):
@@ -166,8 +167,14 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SCADA NIIM")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1280, 1024)
         self.setup_ui()
+
+        # Переменные для работы с последовательным портом
+        self.serial_thread = None
+        self.serial_worker = None
+
+        self.start_serial_thread()
 
     def setup_ui(self):
         main_layout = QHBoxLayout()
@@ -198,16 +205,54 @@ class MainWindow(QWidget):
         main_layout.addWidget(self.schematic, stretch=2)
         main_layout.addWidget(self.graph_panel, stretch=1)
 
+    def display_data(self, data):
+        self.graph_panel.update_plots([data["MIDA"], data["Magdischarge"], data["ThermalIndicator"]])
+
+    def display_error(self, error_msg):
+        print(error_msg)
+
+    def update_connection_status(self, connected):
+        print(connected)
+
+    def start_serial_thread(self):
+        # Создаем рабочий объект и поток
+        self.serial_worker = SerialWorker()
+        self.serial_thread = QThread()
+
+        # Перемещаем worker в поток
+        self.serial_worker.moveToThread(self.serial_thread)
+
+        # Подключаем сигналы
+        self.serial_worker.data_received.connect(self.display_data)
+        self.serial_worker.error_occurred.connect(self.display_error)
+        self.serial_worker.connection_status.connect(self.update_connection_status)
+
+        # Подключаем методы потока
+        self.serial_thread.started.connect(self.serial_worker.connect_serial)
+        self.serial_thread.started.connect(self.serial_worker.read_serial_data)
+
+        # Запускаем поток
+        self.serial_thread.start()
+
+    def stop_serial_thread(self):
+        if self.serial_worker:
+            self.serial_worker.stop()
+        if self.serial_thread:
+            self.serial_thread.quit()
+            self.serial_thread.wait()
+
+        self.serial_worker = None
+        self.serial_thread = None
+        self.connect_btn.setText("Connect")
+
+
     def toggle_valve(self):
         self.schematic.toggle_valve()
         self.graph_panel.mark_event()
 
 
 if __name__ == "__main__":
-    reader_thread = threading.Thread(target=mai, daemon=True)
-    reader_thread.start()
-
     app = QApplication(sys.argv)
     window = MainWindow()
-    window.showFullScreen()
+    window.show()
     sys.exit(app.exec_())
