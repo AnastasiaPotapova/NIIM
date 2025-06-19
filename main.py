@@ -6,20 +6,23 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
     QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem, QGraphicsPolygonItem, QGraphicsRectItem,
-    QGraphicsLineItem
+    QGraphicsLineItem, QGraphicsTextItem
 )
-from PyQt5.QtGui import QBrush, QColor, QPolygonF, QPen
+from PyQt5.QtGui import QBrush, QColor, QPolygonF, QPen, QFont, QPainter
 from PyQt5.QtCore import QTimer, QPointF, Qt
 import pyqtgraph as pg
-from SerParse import *
 from SerialWorker import *
 
 class ValveSymbol(QGraphicsPolygonItem):
-    def __init__(self, center_x, center_y, orientation='horizontal'):
+    def __init__(self, label, center_x, center_y, orientation='h'):
         super().__init__()
 
-        size = 30
-        if orientation == 'horizontal':
+        size = 20
+        self.center_x = center_x
+        self.center_y = center_y
+        self.orientation = orientation
+
+        if orientation == 'h':
             triangle1 = QPolygonF([
                 QPointF(center_x, center_y),
                 QPointF(center_x - size, center_y - size),
@@ -47,9 +50,17 @@ class ValveSymbol(QGraphicsPolygonItem):
         self.triangle1_item.setBrush(QBrush(QColor("gray")))
         self.triangle2_item.setBrush(QBrush(QColor("gray")))
 
+        # Добавляем подпись слева от клапана
+        self.label_item = QGraphicsTextItem(label)
+        font = QFont()
+        font.setBold(True)
+        self.label_item.setFont(font)
+        self.label_item.setPos(center_x - size - 20, center_y - 10)
+
     def add_to_scene(self, scene):
         scene.addItem(self.triangle1_item)
         scene.addItem(self.triangle2_item)
+        scene.addItem(self.label_item)
 
     def toggle_color(self):
         current_color = self.triangle1_item.brush().color().name()
@@ -57,9 +68,8 @@ class ValveSymbol(QGraphicsPolygonItem):
         self.triangle1_item.setBrush(QBrush(QColor(new_color)))
         self.triangle2_item.setBrush(QBrush(QColor(new_color)))
 
-
 class PumpSymbol(QGraphicsRectItem):
-    def __init__(self, center_x, center_y):
+    def __init__(self, name, center_x, center_y):
         size = 40
         super().__init__(center_x - size / 2, center_y - size / 2, size, size)
         self.setBrush(QBrush(QColor("lightblue")))
@@ -68,28 +78,42 @@ class PumpSymbol(QGraphicsRectItem):
         circle.setBrush(QBrush(QColor("blue")))
         self.circle = circle
 
+        self.label_item = QGraphicsTextItem(name)
+        font = QFont()
+        font.setBold(True)
+        self.label_item.setFont(font)
+        self.label_item.setPos(center_x - size - 5, center_y - 10)
+
     def add_to_scene(self, scene):
         scene.addItem(self)
         scene.addItem(self.circle)
-
+        scene.addItem(self.label_item)
 
 class VacuumGauge:
-    def __init__(self, center_x, center_y, radius=30):
+    def __init__(self, name, center_x, center_y, radius=15):
         self.center_x = center_x
         self.center_y = center_y
         self.radius = radius
 
-        # Круг вакууметра
+        # Заполненный белый круг
         self.circle = QGraphicsEllipseItem(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
         self.circle.setPen(QPen(Qt.black, 2))
+        self.circle.setBrush(QBrush(QColor("white")))
 
-        # Стрелка
+        # Красная стрелка
         self.arrow = QGraphicsLineItem()
         self.arrow.setPen(QPen(Qt.red, 2))
-        self.set_angle(0)  # начальный угол
+        self.set_angle(0)
+
+        self.label = QGraphicsTextItem(name)
+        font = QFont()
+        font.setBold(True)
+        self.label.setFont(font)
+        label_x = center_x - radius - 30
+        label_y = center_y - 10
+        self.label.setPos(label_x, label_y)
 
     def set_angle(self, angle_deg):
-        # Угол в градусах, 0 = вправо, 90 = вверх
         angle_rad = math.radians(angle_deg)
         end_x = self.center_x + self.radius * math.cos(angle_rad)
         end_y = self.center_y - self.radius * math.sin(angle_rad)
@@ -98,7 +122,7 @@ class VacuumGauge:
     def add_to_scene(self, scene):
         scene.addItem(self.circle)
         scene.addItem(self.arrow)
-
+        scene.addItem(self.label)
 
 class SchematicWidget(QGraphicsView):
     def __init__(self):
@@ -106,20 +130,72 @@ class SchematicWidget(QGraphicsView):
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
         self.setSceneRect(0, 0, 400, 400)
-
-        # Используем символ клапана
-        self.valve_item = ValveSymbol(200, 200, orientation='horizontal')
-        self.valve_item.add_to_scene(self.scene)
+        self.items = {}
 
         # Добавим насос
-        self.pump_item = PumpSymbol(100, 100)
-        self.pump_item.add_to_scene(self.scene)
+        self.items["NR"] = PumpSymbol("NR", 60, 220)
+        self.items["NR"].add_to_scene(self.scene)
 
-        self.vacuum_gauge = VacuumGauge(300, 100)
-        self.vacuum_gauge.add_to_scene(self.scene)
+        self.items["NI"] = PumpSymbol("NI", 140, 380)
+        self.items["NI"].add_to_scene(self.scene)
 
-    def toggle_valve(self):
-        self.valve_item.toggle_color()
+        # Используем символ клапана
+        self.items["V1"] = ValveSymbol("V1", 140, 340, orientation='v')
+        self.items["V1"].add_to_scene(self.scene)
+
+        self.items["V2"] = ValveSymbol("V2", 60, 180, orientation='v')
+        self.items["V2"].add_to_scene(self.scene)
+
+        self.items["V3"] = ValveSymbol("V3", 60, 260, orientation='v')
+        self.items["V3"].add_to_scene(self.scene)
+
+        self.items["V4"] = ValveSymbol("V4", 180, 100, orientation='h')
+        self.items["V4"].add_to_scene(self.scene)
+
+        self.items["V5"] = ValveSymbol("V5", 140, 140, orientation='v')
+        self.items["V5"].add_to_scene(self.scene)
+
+        self.items["V6"] = ValveSymbol("V6", 20, 20, orientation='v')
+        self.items["V6"].add_to_scene(self.scene)
+
+        self.items["V7"] = ValveSymbol("V7", 100, 20, orientation='v')
+        self.items["V7"].add_to_scene(self.scene)
+
+        self.items["V8"] = ValveSymbol("V8", 260, 100, orientation='h')
+        self.items["V8"].add_to_scene(self.scene)
+
+        self.items["VF"] = ValveSymbol("VF", 300, 100, orientation='h')
+        self.items["VF"].add_to_scene(self.scene)
+
+        self.items["CV1"] = QGraphicsRectItem(0, 40, 120, 120)
+        self.items["CV1"].setBrush(QBrush(QColor("lightblue")))
+        self.scene.addItem(self.items["CV1"])
+
+        self.items["P1"] = VacuumGauge("P1", 180, 300)
+        self.items["P1"].add_to_scene(self.scene)
+
+        self.items["P2"] = VacuumGauge("P2", 220, 100)
+        self.items["P2"].add_to_scene(self.scene)
+
+        self.items["P3"] = VacuumGauge("P3", 140, 60)
+        self.items["P3"].add_to_scene(self.scene)
+
+        self.draw_line(60, 280, 60, 300)
+        self.draw_line(160, 300, 60, 300)
+        self.draw_line(140, 320, 140, 160)
+        self.draw_line(140, 80, 140, 120)
+        self.draw_line(120, 100, 160, 100)
+
+    def draw_line(self, x1, y1, x2, y2):
+        line = self.scene.addLine(x1, y1, x2, y2)
+
+        # Настраиваем внешний вид линии
+        pen = QPen(Qt.red)  # Красный цвет
+        pen.setWidth(1)  # Толщина 3 пикселя
+        line.setPen(pen)
+
+    def toggle_valve(self, name):
+        self.items[name].toggle_color()
 
 
 class GraphPanel(QWidget):
@@ -190,9 +266,29 @@ class MainWindow(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFixedWidth(200)
 
-        self.valve_button = QPushButton("Открыть клапан")
-        self.valve_button.clicked.connect(self.toggle_valve)
-        control_layout.addWidget(self.valve_button)
+        self.v1_button = QPushButton("Открыть клапан V1")
+        self.v1_button.clicked.connect(lambda: self.toggle_valve("V1"))
+        control_layout.addWidget(self.v1_button)
+
+        self.v2_button = QPushButton("Открыть клапан V2")
+        self.v2_button.clicked.connect(lambda: self.toggle_valve("V2"))
+        control_layout.addWidget(self.v2_button)
+
+        self.v3_button = QPushButton("Открыть клапан V3")
+        self.v3_button.clicked.connect(lambda: self.toggle_valve("V3"))
+        control_layout.addWidget(self.v3_button)
+
+        self.v4_button = QPushButton("Открыть клапан V4")
+        self.v4_button.clicked.connect(lambda: self.toggle_valve("V4"))
+        control_layout.addWidget(self.v4_button)
+
+        self.v5_button = QPushButton("Открыть клапан V5")
+        self.v5_button.clicked.connect(lambda: self.toggle_valve("V5"))
+        control_layout.addWidget(self.v5_button)
+
+        self.v8_button = QPushButton("Открыть клапан V8")
+        self.v8_button.clicked.connect(lambda: self.toggle_valve("V8"))
+        control_layout.addWidget(self.v8_button)
 
         # === Block 2: Schematic Widget ===
         self.schematic = SchematicWidget()
@@ -202,17 +298,17 @@ class MainWindow(QWidget):
 
         # Add blocks to main layout
         main_layout.addWidget(scroll_area)
-        main_layout.addWidget(self.schematic, stretch=2)
+        main_layout.addWidget(self.schematic, stretch=1)
         main_layout.addWidget(self.graph_panel, stretch=1)
 
     def display_data(self, data):
         self.graph_panel.update_plots([data["MIDA"], data["Magdischarge"], data["ThermalIndicator"]])
 
     def display_error(self, error_msg):
-        print(error_msg)
+        ...
 
     def update_connection_status(self, connected):
-        print(connected)
+        ...
 
     def start_serial_thread(self):
         # Создаем рабочий объект и поток
@@ -246,8 +342,8 @@ class MainWindow(QWidget):
         self.connect_btn.setText("Connect")
 
 
-    def toggle_valve(self):
-        self.schematic.toggle_valve()
+    def toggle_valve(self, name):
+        self.schematic.toggle_valve(name)
         self.graph_panel.mark_event()
 
 

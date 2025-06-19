@@ -45,7 +45,7 @@ class SerialWorker(QObject):
         dt4byte = []
         for i in range(len4byte):
             dt4byte.append(self.serial_connection.read(4))
-        print(dt4byte)
+
         prot["TMNrpm"] = int.from_bytes(dt4byte[0], 'little')
         prot["MIDA"] = struct.unpack('<f', dt4byte[1])[0]
         prot["Magdischarge"] = struct.unpack('<f', dt4byte[2])[0]
@@ -54,13 +54,17 @@ class SerialWorker(QObject):
         prot["TEMP2"] = struct.unpack('<f', dt4byte[5])[0]
         prot["Analogexit"] = struct.unpack('<f', dt4byte[6])[0]
 
-        print(prot)
         self.data_received.emit(prot)
 
-    def parse_error_packet(self, packet: bytes):
-        ...
+    def parse_error_packet(self):
+        prot = {}
+        prot["CMD_ID"] = self.serial_connection.read(1)[0]
+        prot["ERROR_CODE"] = self.serial_connection.read(1)[0]
 
-    def parse_eprom_packet(self, packet: bytes):
+        lenerr = self.serial_connection.read(1)[0]
+        prot["ERROR_INFO"] = self.serial_connection.read(lenerr)
+
+    def parse_eprom_packet(self):
         ...
 
     def connect_serial(self):
@@ -89,9 +93,7 @@ class SerialWorker(QObject):
                 byte = self.serial_connection.read(1)
                 if not byte:
                     continue
-                print(byte)
                 if byte[0] == self.sync_byte_exchange:
-                    print(0000000)
                     self.parse_exchange_packet()
                 elif byte[0] == self.sync_byte_error:
                     packet = byte + self.serial_connection.read(36)  # уже прочитали 1 байт, читаем оставшиеся
