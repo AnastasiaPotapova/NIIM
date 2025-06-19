@@ -6,7 +6,7 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
     QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem, QGraphicsPolygonItem, QGraphicsRectItem,
-    QGraphicsLineItem, QGraphicsTextItem
+    QGraphicsLineItem, QGraphicsTextItem, QMenuBar, QAction, qApp, QGridLayout
 )
 from PyQt5.QtGui import QBrush, QColor, QPolygonF, QPen, QFont, QPainter
 from PyQt5.QtCore import QTimer, QPointF, Qt
@@ -253,8 +253,22 @@ class MainWindow(QWidget):
         self.start_serial_thread()
 
     def setup_ui(self):
-        main_layout = QHBoxLayout()
+        main_layout = QGridLayout()
+        work_panel = QWidget()
+        work_layout = QHBoxLayout()
+        work_panel.setLayout(work_layout)
         self.setLayout(main_layout)
+
+        menubar = QMenuBar()
+        actionFile = menubar.addMenu("File")
+        actionFile.addAction("New")
+        actionFile.addAction("Open")
+        actionFile.addAction("Save")
+        actionFile.addSeparator()
+        actionFile.addAction("Quit")
+        menubar.addMenu("Edit")
+        menubar.addMenu("View")
+        menubar.addMenu("Help")
 
         # === Block 1: Control Panel with Scroll ===
         control_panel = QWidget()
@@ -297,9 +311,11 @@ class MainWindow(QWidget):
         self.graph_panel = GraphPanel()
 
         # Add blocks to main layout
-        main_layout.addWidget(scroll_area)
-        main_layout.addWidget(self.schematic, stretch=1)
-        main_layout.addWidget(self.graph_panel, stretch=1)
+        main_layout.addWidget(menubar, 0, 0)
+        work_layout.addWidget(scroll_area)
+        work_layout.addWidget(self.schematic, stretch=1)
+        work_layout.addWidget(self.graph_panel, stretch=1)
+        main_layout.addWidget(work_panel)
 
     def display_data(self, data):
         self.graph_panel.update_plots([data["MIDA"], data["Magdischarge"], data["ThermalIndicator"]])
