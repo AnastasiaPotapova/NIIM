@@ -1,8 +1,8 @@
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 import serial
+import struct
 import serial.tools.list_ports
 from time import sleep
-from SerParse import *
 
 class SerialWorker(QObject):
     data_received = pyqtSignal(dict)  # Сигнал для передачи полученных данных
@@ -97,10 +97,10 @@ class SerialWorker(QObject):
                     self.parse_exchange_packet()
                 elif byte[0] == self.sync_byte_error:
                     packet = byte + self.serial_connection.read(36)  # уже прочитали 1 байт, читаем оставшиеся
-                    parse_error_packet(packet)
+                    #parse_error_packet(packet)
                 elif byte[0] == self.sync_byte_eprom:
                     packet = byte + self.serial_connection.read(36)  # уже прочитали 1 байт, читаем оставшиеся
-                    parse_eprom_packet(packet)
+                    #parse_eprom_packet(packet)
             except Exception as e:
                 self.error_occurred.emit(f"Read error: {str(e)}")
                 sleep(1)

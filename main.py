@@ -1,12 +1,14 @@
 import math
 import sys
 import threading
+import random
 
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
     QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsEllipseItem, QGraphicsPolygonItem, QGraphicsRectItem,
-    QGraphicsLineItem, QGraphicsTextItem, QMenuBar, QAction, qApp, QGridLayout
+    QGraphicsLineItem, QGraphicsTextItem, QMenuBar, QAction, qApp, QGridLayout, QStackedWidget, QTableWidgetItem,
+    QTableWidget, QLineEdit, QLabel
 )
 from PyQt5.QtGui import QBrush, QColor, QPolygonF, QPen, QFont, QPainter
 from PyQt5.QtCore import QTimer, QPointF, Qt
@@ -14,7 +16,7 @@ import pyqtgraph as pg
 from SerialWorker import *
 
 class ValveSymbol(QGraphicsPolygonItem):
-    def __init__(self, label, center_x, center_y, orientation='h'):
+    def __init__(self, label, set, center_x, center_y, orientation='h'):
         super().__init__()
 
         size = 20
@@ -55,7 +57,19 @@ class ValveSymbol(QGraphicsPolygonItem):
         font = QFont()
         font.setBold(True)
         self.label_item.setFont(font)
-        self.label_item.setPos(center_x - size - 20, center_y - 10)
+        if set == "l":
+            label_x = center_x - size - 30
+            label_y = center_y - 10
+        elif set == "r":
+            label_x = center_x + size
+            label_y = center_y - 10
+        elif set == "t":
+            label_x = center_x - 10
+            label_y = center_y - size - 30
+        else:
+            label_x = center_x - 10
+            label_y = center_y + size + 30
+        self.label_item.setPos(label_x, label_y)
 
     def add_to_scene(self, scene):
         scene.addItem(self.triangle1_item)
@@ -90,7 +104,7 @@ class PumpSymbol(QGraphicsRectItem):
         scene.addItem(self.label_item)
 
 class VacuumGauge:
-    def __init__(self, name, center_x, center_y, radius=15):
+    def __init__(self, name, set, center_x, center_y, radius=15):
         self.center_x = center_x
         self.center_y = center_y
         self.radius = radius
@@ -109,8 +123,18 @@ class VacuumGauge:
         font = QFont()
         font.setBold(True)
         self.label.setFont(font)
-        label_x = center_x - radius - 30
-        label_y = center_y - 10
+        if set == "l":
+            label_x = center_x - radius - 30
+            label_y = center_y - 10
+        elif set == "r":
+            label_x = center_x + radius + 30
+            label_y = center_y - 10
+        elif set == "t":
+            label_x = center_x - 10
+            label_y = center_y - radius - 30
+        else:
+            label_x = center_x - 10
+            label_y = center_y + radius + 30
         self.label.setPos(label_x, label_y)
 
     def set_angle(self, angle_deg):
@@ -140,44 +164,44 @@ class SchematicWidget(QGraphicsView):
         self.items["NI"].add_to_scene(self.scene)
 
         # Используем символ клапана
-        self.items["V1"] = ValveSymbol("V1", 140, 340, orientation='v')
+        self.items["V1"] = ValveSymbol("V1", "l", 140, 340, orientation='v')
         self.items["V1"].add_to_scene(self.scene)
 
-        self.items["V2"] = ValveSymbol("V2", 60, 180, orientation='v')
+        self.items["V2"] = ValveSymbol("V2", "l",60, 180, orientation='v')
         self.items["V2"].add_to_scene(self.scene)
 
-        self.items["V3"] = ValveSymbol("V3", 60, 260, orientation='v')
+        self.items["V3"] = ValveSymbol("V3", "l", 60, 260, orientation='v')
         self.items["V3"].add_to_scene(self.scene)
 
-        self.items["V4"] = ValveSymbol("V4", 180, 100, orientation='h')
+        self.items["V4"] = ValveSymbol("V4", "t",180, 100, orientation='h')
         self.items["V4"].add_to_scene(self.scene)
 
-        self.items["V5"] = ValveSymbol("V5", 140, 140, orientation='v')
+        self.items["V5"] = ValveSymbol("V5", "r", 140, 140, orientation='v')
         self.items["V5"].add_to_scene(self.scene)
 
-        self.items["V6"] = ValveSymbol("V6", 20, 20, orientation='v')
+        self.items["V6"] = ValveSymbol("V6", "t",20, 20, orientation='v')
         self.items["V6"].add_to_scene(self.scene)
 
-        self.items["V7"] = ValveSymbol("V7", 100, 20, orientation='v')
+        self.items["V7"] = ValveSymbol("V7", "t", 100, 20, orientation='v')
         self.items["V7"].add_to_scene(self.scene)
 
-        self.items["V8"] = ValveSymbol("V8", 260, 100, orientation='h')
+        self.items["V8"] = ValveSymbol("V8", "t", 260, 100, orientation='h')
         self.items["V8"].add_to_scene(self.scene)
 
-        self.items["VF"] = ValveSymbol("VF", 300, 100, orientation='h')
+        self.items["VF"] = ValveSymbol("VF", "t", 300, 100, orientation='h')
         self.items["VF"].add_to_scene(self.scene)
 
         self.items["CV1"] = QGraphicsRectItem(0, 40, 120, 120)
         self.items["CV1"].setBrush(QBrush(QColor("lightblue")))
         self.scene.addItem(self.items["CV1"])
 
-        self.items["P1"] = VacuumGauge("P1", 180, 300)
+        self.items["P1"] = VacuumGauge("P1", "t",180, 300)
         self.items["P1"].add_to_scene(self.scene)
 
-        self.items["P2"] = VacuumGauge("P2", 220, 100)
+        self.items["P2"] = VacuumGauge("P2", "t",220, 100)
         self.items["P2"].add_to_scene(self.scene)
 
-        self.items["P3"] = VacuumGauge("P3", 140, 60)
+        self.items["P3"] = VacuumGauge("P3", "t", 140, 60)
         self.items["P3"].add_to_scene(self.scene)
 
         self.draw_line(60, 280, 60, 300)
@@ -196,7 +220,6 @@ class SchematicWidget(QGraphicsView):
 
     def toggle_valve(self, name):
         self.items[name].toggle_color()
-
 
 class GraphPanel(QWidget):
     def __init__(self):
@@ -238,6 +261,130 @@ class GraphPanel(QWidget):
         self.mark_requested = True
         self.current_index = 100  # Сброс позиции метки, чтобы она шла с начала данных
 
+class EepromWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Данные EEPROM")
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+
+        # Поля ввода начала и конца
+        input_layout = QHBoxLayout()
+        self.start_input = QLineEdit()
+        self.end_input = QLineEdit()
+        self.start_input.setPlaceholderText("Начальный индекс")
+        self.end_input.setPlaceholderText("Конечный индекс")
+        input_layout.addWidget(QLabel("От:"))
+        input_layout.addWidget(self.start_input)
+        input_layout.addWidget(QLabel("До:"))
+        input_layout.addWidget(self.end_input)
+
+        self.layout.addLayout(input_layout)
+
+        buttons_layout = QHBoxLayout()
+        self.generate_button = QPushButton("Прочитать")
+        self.generate_button.clicked.connect(self.generate_table)
+        buttons_layout.addWidget(self.generate_button)
+
+        self.save_button = QPushButton("Сохранить")
+        self.save_button.clicked.connect(self.save_table)
+        buttons_layout.addWidget(self.save_button)
+
+        self.layout.addLayout(buttons_layout)
+
+        self.table = QTableWidget()
+        self.layout.addWidget(self.table)
+
+    def generate_table(self):
+        try:
+            start = int(self.start_input.text())
+            end = int(self.end_input.text())
+            if start > end:
+                raise ValueError("Начальный индекс должен быть меньше или равен конечному.")
+        except ValueError:
+            self.start_input.setText("")
+            self.end_input.setText("")
+            self.start_input.setPlaceholderText("Ошибка: введите числа")
+            self.end_input.setPlaceholderText("Ошибка: введите числа")
+            return
+
+        count = end - start + 1
+        self.table.setRowCount(count)
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Индекс", "Ox", "Od"])
+
+        for i, index in enumerate(range(start, end + 1)):
+            # Ячейки редактируемые по умолчанию
+            self.table.setItem(i, 0, QTableWidgetItem(str(index)))
+            self.table.setItem(i, 1, QTableWidgetItem(str(random.randint(0, 100))))
+            self.table.setItem(i, 2, QTableWidgetItem(str(random.randint(0, 100))))
+
+    def save_table(self):
+        rows = self.table.rowCount()
+        cols = self.table.columnCount()
+
+        result = []
+        for row in range(rows):
+            row_data = []
+            for col in range(cols):
+                item = self.table.item(row, col)
+                text = item.text() if item else ""
+                row_data.append(text)
+            result.append(row_data)
+
+        # Пример: выводим результат в консоль
+        print("Сохранённые данные:")
+        for r in result:
+            print(r)
+
+
+class ConfigWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Конфигурация")
+        self.setFixedSize(400, 300)
+        self.layout = QVBoxLayout(self)
+
+        # Таблица
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)  # 2 столбца данных + 1 столбец для кнопки
+        self.table.setHorizontalHeaderLabels(["Параметр", "Значение", ""])  # третий без названия
+        self.layout.addWidget(self.table)
+
+        # Начальные 3 строки
+        for _ in range(3):
+            self.add_row()
+
+        # Кнопка добавления
+        self.add_button = QPushButton("Добавить строку")
+        self.add_button.clicked.connect(self.add_row)
+        self.layout.addWidget(self.add_button)
+        self.save_button = QPushButton("Сохранить")
+        self.layout.addWidget(self.save_button)
+
+    def add_row(self):
+        row_position = self.table.rowCount()
+        self.table.insertRow(row_position)
+
+        # Редактируемые ячейки
+        self.table.setItem(row_position, 0, QTableWidgetItem(""))
+        self.table.setItem(row_position, 1, QTableWidgetItem(""))
+
+        # Кнопка удаления
+        delete_button = QPushButton("🗙")
+        delete_button.setStyleSheet("color: red; font-weight: bold;")
+        delete_button.clicked.connect(lambda _, r=row_position: self.delete_row(r))
+        self.table.setCellWidget(row_position, 2, delete_button)
+
+    def delete_row(self, row):
+        self.table.removeRow(row)
+
+        # После удаления пересоздаем кнопки, чтобы lambda не хранил старые индексы
+        for r in range(self.table.rowCount()):
+            button = QPushButton("🗙")
+            button.setStyleSheet("color: red; font-weight: bold;")
+            button.clicked.connect(lambda _, row=r: self.delete_row(row))
+            self.table.setCellWidget(r, 2, button)
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -245,7 +392,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("SCADA NIIM")
         self.setGeometry(100, 100, 1280, 1024)
         self.setup_ui()
-
+        self.mode = 0
         # Переменные для работы с последовательным портом
         self.serial_thread = None
         self.serial_worker = None
@@ -260,23 +407,33 @@ class MainWindow(QWidget):
         self.setLayout(main_layout)
 
         menubar = QMenuBar()
-        actionFile = menubar.addMenu("File")
-        actionFile.addAction("New")
-        actionFile.addAction("Open")
-        actionFile.addAction("Save")
-        actionFile.addSeparator()
-        actionFile.addAction("Quit")
-        menubar.addMenu("Edit")
-        menubar.addMenu("View")
-        menubar.addMenu("Help")
+        actionFile = menubar.addMenu("Режим работы")
+        avto = actionFile.addAction("Автоматический")
+        avto.triggered.connect(self.setAvto)
+        pro = actionFile.addAction("Продвинутый")
+        pro.triggered.connect(self.setPro)
+        EepromBar = menubar.addMenu("ЭСППЗУ")
+        EepromWrite = EepromBar.addAction("Записать")
+
+        EepromRead = EepromBar.addAction("Прочитать")
+        EepromRead.triggered.connect(self.ReadEeprom)
+
+        Config = menubar.addAction("Редактировать конфигурацию")
+        Config.triggered.connect(self.ReadConfig)
+
+        menubar.addMenu("Логи")
 
         # === Block 1: Control Panel with Scroll ===
+        self.work_control = QStackedWidget()
+
+
         control_panel = QWidget()
+        self.work_control.addWidget(control_panel)
         control_layout = QVBoxLayout()
         control_panel.setLayout(control_layout)
 
         scroll_area = QScrollArea()
-        scroll_area.setWidget(control_panel)
+        scroll_area.setWidget(self.work_control)
         scroll_area.setWidgetResizable(True)
         scroll_area.setFixedWidth(200)
 
@@ -304,6 +461,19 @@ class MainWindow(QWidget):
         self.v8_button.clicked.connect(lambda: self.toggle_valve("V8"))
         control_layout.addWidget(self.v8_button)
 
+        basic_panel = QWidget()
+        self.work_control.addWidget(basic_panel)
+        basic_layout = QVBoxLayout()
+        basic_panel.setLayout(basic_layout)
+
+        self.v10_button = QPushButton("Открыть клапан V1")
+        self.v10_button.clicked.connect(lambda: self.toggle_valve("V1"))
+        basic_layout.addWidget(self.v10_button)
+
+        self.v20_button = QPushButton("Открыть клапан V2")
+        self.v20_button.clicked.connect(lambda: self.toggle_valve("V2"))
+        basic_layout.addWidget(self.v20_button)
+
         # === Block 2: Schematic Widget ===
         self.schematic = SchematicWidget()
 
@@ -316,6 +486,20 @@ class MainWindow(QWidget):
         work_layout.addWidget(self.schematic, stretch=1)
         work_layout.addWidget(self.graph_panel, stretch=1)
         main_layout.addWidget(work_panel)
+
+    def setAvto(self):
+        self.work_control.setCurrentIndex(1)
+
+    def setPro(self):
+        self.work_control.setCurrentIndex(0)
+
+    def ReadEeprom(self):
+        self.w = EepromWindow()
+        self.w.show()
+
+    def ReadConfig(self):
+        self.w2 = ConfigWidget()
+        self.w2.show()
 
     def display_data(self, data):
         self.graph_panel.update_plots([data["MIDA"], data["Magdischarge"], data["ThermalIndicator"]])
