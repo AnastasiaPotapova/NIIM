@@ -11,14 +11,17 @@ class SerialWorker(QObject):
 
     def __init__(self):
         super().__init__()
-        self.port = '/dev/ttyUSB0'
+        self.port = "/dev/ttyUSB0"
         self.baudrate = 115200
         self.timeout = 1
         self.is_running = True
-        self.serial_connection = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+        self.serial_connection = None
+
         self.sync_byte_exchange = 0xAA
         self.sync_byte_error = 0xBB
         self.sync_byte_eprom = 0xCC
+
+        self.find_port()
 
     def parse_exchange_packet(self):
         prot = {}
@@ -67,6 +70,21 @@ class SerialWorker(QObject):
     def parse_eprom_packet(self):
         ...
 
+    def find_port(self):
+        while True:
+            try:
+                ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
+                data = ser.read(1)
+                print(data)
+                if 0x01 in data:
+                    self.connection_status.emit(True)
+                    self.connect_serial()
+                    return
+                ser.close()
+            except Exception:
+                self.connection_status.emit(False)
+                continue
+
     def connect_serial(self):
         try:
             self.serial_connection = serial.Serial(
@@ -74,11 +92,8 @@ class SerialWorker(QObject):
                 baudrate=self.baudrate,
                 timeout=self.timeout
             )
-            self.connection_status.emit(True)
-            return True
         except Exception as e:
             self.error_occurred.emit(f"Connection error: {str(e)}")
-            self.connection_status.emit(False)
             return False
 
     def disconnect_serial(self):
