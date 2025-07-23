@@ -42,13 +42,3 @@ class GraphPanel(QWidget):
         self.mark_requested = True
         self.current_index = 100
 
-
-
-class MplCanvas(FigureCanvas):
-    def __init__(self):
-        self.fig = Figure()
-        self.ax = self.fig.add_subplot(111)
-        super().__init__(self.fig)
-        self.ax.set_title("Три графика с COM-порта")
-        self.ax.set_xlabel("Время")
-        self.ax.set_ylabel("Значения")

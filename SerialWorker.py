@@ -5,8 +5,6 @@ from time import sleep
 
 
 class SerialWorker(QObject):
-    """Работает в отдельном QThread, сам пытается найти устройство,
-    читает данные и сообщает о подключении/отключении."""
     data_received = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
     connection_status = pyqtSignal(bool)      # True ‒ устройство есть, False ‒ потеряно
@@ -81,8 +79,6 @@ class SerialWorker(QObject):
 
     # ----------  главный цикл потока  ----------
     def run(self):
-        """Эта функция подключается к QThread.started.
-        Не блокирует GUI ‒ работает внутри потока."""
         while self.is_running:
             # 1. Пытаемся найти устройство
             while self.is_running and not self._open_port():
@@ -91,9 +87,8 @@ class SerialWorker(QObject):
             if not self.is_running:
                 break
 
-            # Простейшая проверка «жив-ли контроллер» (ожидаем байт 0x01)
             try:
-                if self.serial_connection.read(1) != b'\x01':
+                if self.serial_connection.read(1) != b'\x01' or self.serial_connection.read(1) != b'\xaa':
                     raise serial.SerialException("Handshake byte not received")
             except Exception as e:
                 self.error_occurred.emit(str(e))
