@@ -1,125 +1,131 @@
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal
 import serial
 import struct
-import serial.tools.list_ports
 from time import sleep
 
-class SerialWorker(QObject):
-    data_received = pyqtSignal(dict)  # Сигнал для передачи полученных данных
-    error_occurred = pyqtSignal(str)  # Сигнал для ошибок
-    connection_status = pyqtSignal(bool)  # Сигнал статуса подключения
 
-    def __init__(self):
+class SerialWorker(QObject):
+    """Работает в отдельном QThread, сам пытается найти устройство,
+    читает данные и сообщает о подключении/отключении."""
+    data_received = pyqtSignal(dict)
+    error_occurred = pyqtSignal(str)
+    connection_status = pyqtSignal(bool)      # True ‒ устройство есть, False ‒ потеряно
+
+    def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200, timeout: int = 1):
         super().__init__()
-        self.port = "/dev/ttyUSB0"
-        self.baudrate = 115200
-        self.timeout = 1
-        self.is_running = True
-        self.serial_connection = None
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
 
         self.sync_byte_exchange = 0xAA
-        self.sync_byte_error = 0xBB
-        self.sync_byte_eprom = 0xCC
+        self.sync_byte_error   = 0xBB
+        self.sync_byte_eprom   = 0xCC
 
-        self.find_port()
+        self.serial_connection = None
+        self.is_running = True        # для корректной остановки из-вне
 
+    # ----------  парсинг пакетов  ----------
     def parse_exchange_packet(self):
         prot = {}
-        len1byte = self.serial_connection.read(1)[0]
-        len4byte = self.serial_connection.read(1)[0]
-
-        if len1byte + 4 * len4byte != 34:
+        len1 = self.serial_connection.read(1)[0]
+        len4 = self.serial_connection.read(1)[0]
+        if len1 + 4 * len4 != 34:          # простой контроль длины
             return
-            # raise BROKEN_POCKET
 
-        # 1-байтные поля
-        dt1byte = []
-        for i in range(len1byte):
-            dt1byte.append(self.serial_connection.read(1)[0])
+        # 1-байтные
+        dt1 = [self.serial_connection.read(1)[0] for _ in range(len1)]
+        prot["ForVacuumState"], prot["TMNState"], prot["DU16"], prot["DU63"], \
+            prot["ElectroValveState"], prot["Mode"] = dt1[:6]
 
-        prot["ForVacuumState"] = dt1byte[0]
-        prot["TMNState"] = dt1byte[1]
-        prot["DU16"] = dt1byte[2]
-        prot["DU63"] = dt1byte[3]
-        prot["ElectroValveState"] = dt1byte[4]
-        prot["Mode"] = dt1byte[5]
-
-        # 4-байтные поля
-        dt4byte = []
-        for i in range(len4byte):
-            dt4byte.append(self.serial_connection.read(4))
-
-        prot["TMNrpm"] = int.from_bytes(dt4byte[0], 'little')
-        prot["MIDA"] = struct.unpack('<f', dt4byte[1])[0]
-        prot["Magdischarge"] = struct.unpack('<f', dt4byte[2])[0]
-        prot["ThermalIndicator"] = struct.unpack('<f', dt4byte[3])[0]
-        prot["TEMP1"] = struct.unpack('<f', dt4byte[4])[0]
-        prot["TEMP2"] = struct.unpack('<f', dt4byte[5])[0]
-        prot["Analogexit"] = struct.unpack('<f', dt4byte[6])[0]
+        # 4-байтные
+        dt4 = [self.serial_connection.read(4) for _ in range(len4)]
+        fields = ["TMNrpm", "MIDA", "Magdischarge", "ThermalIndicator",
+                  "TEMP1", "TEMP2", "Analogexit"]
+        for name, raw in zip(fields, dt4):
+            prot[name] = struct.unpack('<f', raw)[0] if name != "TMNrpm" else int.from_bytes(raw, 'little')
 
         self.data_received.emit(prot)
 
     def parse_error_packet(self):
-        prot = {}
-        prot["CMD_ID"] = self.serial_connection.read(1)[0]
-        prot["ERROR_CODE"] = self.serial_connection.read(1)[0]
-
-        lenerr = self.serial_connection.read(1)[0]
-        prot["ERROR_INFO"] = self.serial_connection.read(lenerr)
+        prot = {
+            "CMD_ID":     self.serial_connection.read(1)[0],
+            "ERROR_CODE": self.serial_connection.read(1)[0],
+        }
+        length = self.serial_connection.read(1)[0]
+        prot["ERROR_INFO"] = self.serial_connection.read(length)
+        self.data_received.emit(prot)
 
     def parse_eprom_packet(self):
-        ...
+        # при необходимости заполните
+        pass
 
-    def find_port(self):
-        while True:
-            try:
-                ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
-                data = ser.read(1)
-                print(data)
-                if 0x01 in data:
-                    self.connection_status.emit(True)
-                    self.connect_serial()
-                    return
-                ser.close()
-            except Exception:
-                self.connection_status.emit(False)
-                continue
-
-    def connect_serial(self):
+    # ----------  работа с портом  ----------
+    def _open_port(self) -> bool:
+        """Пробует открыть порт; True ‒ открылся и готов, False ‒ нет."""
         try:
             self.serial_connection = serial.Serial(
                 port=self.port,
                 baudrate=self.baudrate,
                 timeout=self.timeout
             )
+            return True
         except Exception as e:
-            self.error_occurred.emit(f"Connection error: {str(e)}")
+            self.error_occurred.emit(f"Connection error: {e}")
+            self.serial_connection = None
             return False
 
-    def disconnect_serial(self):
+    def _close_port(self):
         if self.serial_connection and self.serial_connection.is_open:
             self.serial_connection.close()
-        self.connection_status.emit(False)
+        self.serial_connection = None
 
-    def read_serial_data(self):
+    # ----------  главный цикл потока  ----------
+    def run(self):
+        """Эта функция подключается к QThread.started.
+        Не блокирует GUI ‒ работает внутри потока."""
         while self.is_running:
-            try:
-                # Ожидание байта синхронизации
-                byte = self.serial_connection.read(1)
-                if not byte:
-                    continue
-                if byte[0] == self.sync_byte_exchange:
-                    self.parse_exchange_packet()
-                elif byte[0] == self.sync_byte_error:
-                    packet = byte + self.serial_connection.read(36)  # уже прочитали 1 байт, читаем оставшиеся
-                    #parse_error_packet(packet)
-                elif byte[0] == self.sync_byte_eprom:
-                    packet = byte + self.serial_connection.read(36)  # уже прочитали 1 байт, читаем оставшиеся
-                    #parse_eprom_packet(packet)
-            except Exception as e:
-                self.error_occurred.emit(f"Read error: {str(e)}")
+            # 1. Пытаемся найти устройство
+            while self.is_running and not self._open_port():
                 sleep(1)
 
+            if not self.is_running:
+                break
+
+            # Простейшая проверка «жив-ли контроллер» (ожидаем байт 0x01)
+            try:
+                if self.serial_connection.read(1) != b'\x01':
+                    raise serial.SerialException("Handshake byte not received")
+            except Exception as e:
+                self.error_occurred.emit(str(e))
+                self._close_port()
+                continue
+
+            # Устройство нашлось
+            self.connection_status.emit(True)
+
+            # 2. Читаем данные, пока порт открыт
+            while self.is_running and self.serial_connection and self.serial_connection.is_open:
+                try:
+                    byte = self.serial_connection.read(1)
+                    if not byte:
+                        continue
+                    if byte[0] == self.sync_byte_exchange:
+                        self.parse_exchange_packet()
+                    elif byte[0] == self.sync_byte_error:
+                        self.parse_error_packet()
+                    elif byte[0] == self.sync_byte_eprom:
+                        self.parse_eprom_packet()
+                except serial.SerialException as e:
+                    self.error_occurred.emit(f"Read error: {e}")
+                    break
+                except Exception as e:
+                    self.error_occurred.emit(f"Parse error: {e}")
+
+            # 3. Если мы здесь ‒ порт пропал
+            self._close_port()
+            self.connection_status.emit(False)
+
+    # ----------  остановка  ----------
     def stop(self):
         self.is_running = False
-        self.disconnect_serial()
+        self._close_port()

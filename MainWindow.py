@@ -1,6 +1,11 @@
+from PyQt5.QtCore import QThread
 from main_imports import *
 from ShematicWindow import *
 from GraphWindow import *
+from SerialWorker import SerialWorker          # <-- добавили
+# Если main_imports уже содержит QMessageBox ‒ удалите эту строку
+from PyQt5.QtWidgets import QMessageBox
+
 
 class EepromWindow(QWidget):
     def __init__(self):
@@ -126,6 +131,7 @@ class ConfigWidget(QWidget):
             button.clicked.connect(lambda _, row=r: self.delete_row(row))
             self.table.setCellWidget(r, 2, button)
 
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -134,177 +140,169 @@ class MainWindow(QWidget):
         self.setup_ui()
         self.mode = 0
 
+    # ----------  UI  ----------
     def setup_ui(self):
         main_layout = QGridLayout()
-        work_panel = QWidget()
+        work_panel  = QWidget()
         work_layout = QHBoxLayout()
         work_panel.setLayout(work_layout)
         self.setLayout(main_layout)
 
         menubar = QMenuBar()
         actionFile = menubar.addMenu("Режим работы")
-        avto = actionFile.addAction("Автоматический")
-        avto.triggered.connect(self.setAvto)
-        pro = actionFile.addAction("Продвинутый")
-        pro.triggered.connect(self.setPro)
-        EepromBar = menubar.addMenu("ЭСППЗУ")
-        EepromWrite = EepromBar.addAction("Записать")
+        actionFile.addAction("Автоматический").triggered.connect(self.setAvto)
+        actionFile.addAction("Продвинутый").triggered.connect(self.setPro)
 
-        EepromRead = EepromBar.addAction("Прочитать")
-        EepromRead.triggered.connect(self.ReadEeprom)
+        eeprom_menu = menubar.addMenu("ЭСППЗУ")
+        eeprom_menu.addAction("Записать")
+        eeprom_menu.addAction("Прочитать").triggered.connect(self.ReadEeprom)
 
-        Config = menubar.addAction("Редактировать конфигурацию")
-        Config.triggered.connect(self.ReadConfig)
-
+        menubar.addAction("Редактировать конфигурацию").triggered.connect(self.ReadConfig)
         menubar.addMenu("Логи")
 
-        # === Block 1: Control Panel with Scroll ===
+        #  ---  панель управления  ---
         self.work_control = QStackedWidget()
-
-
-        control_panel = QWidget()
-        self.work_control.addWidget(control_panel)
-        control_layout = QVBoxLayout()
-        control_panel.setLayout(control_layout)
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidget(self.work_control)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedWidth(200)
-
-        self.v1_button = QPushButton("Открыть клапан V1")
-        self.v1_button.clicked.connect(lambda: self.toggle_valve("V1"))
-        control_layout.addWidget(self.v1_button)
-
-        self.v2_button = QPushButton("Открыть клапан V2")
-        self.v2_button.clicked.connect(lambda: self.toggle_valve("V2"))
-        control_layout.addWidget(self.v2_button)
-
-        self.v3_button = QPushButton("Открыть клапан V3")
-        self.v3_button.clicked.connect(lambda: self.toggle_valve("V3"))
-        control_layout.addWidget(self.v3_button)
-
-        self.v4_button = QPushButton("Открыть клапан V4")
-        self.v4_button.clicked.connect(lambda: self.toggle_valve("V4"))
-        control_layout.addWidget(self.v4_button)
-
-        self.v5_button = QPushButton("Открыть клапан V5")
-        self.v5_button.clicked.connect(lambda: self.toggle_valve("V5"))
-        control_layout.addWidget(self.v5_button)
-
-        self.v8_button = QPushButton("Открыть клапан V8")
-        self.v8_button.clicked.connect(lambda: self.toggle_valve("V8"))
-        control_layout.addWidget(self.v8_button)
-
+        control_panel     = QWidget()
+        control_layout    = QVBoxLayout(control_panel)
+        self.work_control.addWidget(control_panel)   # продвинутый
         basic_panel = QWidget()
-        self.work_control.addWidget(basic_panel)
-        basic_layout = QVBoxLayout()
-        basic_panel.setLayout(basic_layout)
+        basic_layout = QVBoxLayout(basic_panel)
+        self.work_control.addWidget(basic_panel)     # автоматический
 
-        self.v10_button = QPushButton("Открыть клапан V1")
-        self.v10_button.clicked.connect(lambda: self.toggle_valve("V1"))
-        basic_layout.addWidget(self.v10_button)
+        # продвинутые клапаны
+        for name in ("V1", "V2", "V3", "V4", "V5", "V8"):
+            btn = QPushButton(f"Открыть клапан {name}")
+            btn.clicked.connect(lambda _, n=name: self.toggle_valve(n))
+            control_layout.addWidget(btn)
 
-        self.v20_button = QPushButton("Открыть клапан V2")
-        self.v20_button.clicked.connect(lambda: self.toggle_valve("V2"))
-        basic_layout.addWidget(self.v20_button)
+        # упрощённая панель
+        for name in ("V1", "V2"):
+            btn = QPushButton(f"Открыть клапан {name}")
+            btn.clicked.connect(lambda _, n=name: self.toggle_valve(n))
+            basic_layout.addWidget(btn)
 
-        # === Block 2: Schematic Widget ===
-        self.schematic = SchematicWidget()
+        scroll = QScrollArea()
+        scroll.setWidget(self.work_control)
+        scroll.setWidgetResizable(True)
+        scroll.setFixedWidth(200)
 
-        # === Block 3: Graph Panel with 4 Graphs ===
+        # схематика и графики
+        self.schematic   = SchematicWidget()
         self.graph_panel = GraphPanel()
 
-        # Add blocks to main layout
+        # финальное размещение
         main_layout.addWidget(menubar, 0, 0)
-        work_layout.addWidget(scroll_area)
+        work_layout.addWidget(scroll)
         work_layout.addWidget(self.schematic, stretch=1)
         work_layout.addWidget(self.graph_panel, stretch=1)
         main_layout.addWidget(work_panel)
 
-    def setAvto(self):
-        self.work_control.setCurrentIndex(1)
+    # ----------  меню режимов  ----------
+    def setAvto(self): self.work_control.setCurrentIndex(1)
+    def setPro(self):  self.work_control.setCurrentIndex(0)
 
-    def setPro(self):
-        self.work_control.setCurrentIndex(0)
-
+    # ----------  дополнительные окна  ----------
     def ReadEeprom(self):
-        self.w = EepromWindow()
-        self.w.show()
+        self.w = EepromWindow(); self.w.show()
 
     def ReadConfig(self):
-        self.w2 = ConfigWidget()
-        self.w2.show()
+        self.w2 = ConfigWidget(); self.w2.show()
 
-    def display_data(self, data):
-        self.graph_panel.update_plots([data["MIDA"], data["Magdischarge"], data["ThermalIndicator"]])
+    # ----------  обратные вызовы от SerialWorker  ----------
+    def display_data(self, data: dict):
+        # Пример ‒ обновляем графики
+        self.graph_panel.update_plots([data.get("MIDA", 0),
+                                       data.get("Magdischarge", 0),
+                                       data.get("ThermalIndicator", 0)])
 
-    def display_error(self, error_msg):
-        ...
+    def display_error(self, msg: str):
+        QMessageBox.critical(self, "Ошибка связи", msg)
 
-    def update_connection_status(self, connected):
-        ...
+    def update_connection_status(self, connected: bool):
+        postfix = " (подключено)" if connected else " (нет подключения)"
+        self.setWindowTitle("SCADA NIIM" + postfix)
 
-    def toggle_valve(self, name):
+    # ----------  пользовательские действия  ----------
+    def toggle_valve(self, name: str):
         self.schematic.toggle_valve(name)
         self.graph_panel.mark_event()
 
+# ------------------------------------------------------------------------------------------------
+#                                          Приложение
+# ------------------------------------------------------------------------------------------------
 class LoadingWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Ожидание устройства...")
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Ожидание подключения по COM..."))
-        self.setLayout(layout)
         self.setGeometry(100, 100, 300, 100)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Ожидание подключения по COM..."))
+
 
 class App:
+    """Контролирует окна и поток SerialWorker."""
     def __init__(self):
-        self.app = QApplication(sys.argv)
+        self.qt_app = QApplication(sys.argv)
 
+        # окно ожидания (может быстро исчезнуть, если контроллер уже подключён)
         self.loading = LoadingWindow()
-        self.main = MainWindow()
         self.loading.show()
-        self.serial_thread = None
-        self.serial_worker = None
-        self.display_data = None
-        self.display_error = None
-        self.update_connection_status = None
 
-        self.start_serial_thread()
-
-    def launch_main_window(self):
-        self.loading.close()
-        self.main.show()
-
-    def start_serial_thread(self):
-        self.serial_worker = SerialWorker()
+        # создаём поток + воркера
         self.serial_thread = QThread()
-
+        self.serial_worker = SerialWorker()
         self.serial_worker.moveToThread(self.serial_thread)
 
-        #self.serial_worker.data_received.connect(self.display_data)
-        #self.serial_worker.error_occurred.connect(self.display_error)
-        self.serial_worker.connection_status.connect(self.launch_main_window)
-
-        self.serial_thread.started.connect(self.serial_worker.connect_serial)
-        self.serial_thread.started.connect(self.serial_worker.read_serial_data)
-
-        if self.update_connection_status:
-            self.launch_main_window()
+        # сигналы
+        self.serial_thread.started.connect(self.serial_worker.run)
+        self.serial_worker.connection_status.connect(self._on_connection_status)
 
         self.serial_thread.start()
+        self.main: MainWindow | None = None
 
-    def stop_serial_thread(self):
+    # ----------  реакции на (от-)подключение устройства  ----------
+    def _on_connection_status(self, connected: bool):
+        if connected:
+            # если главное окно ещё не создано – создаём
+            if self.main is None:
+                self._launch_main_window()
+            else:
+                self.main.update_connection_status(True)
+
+            # убираем окно ожидания
+            if self.loading.isVisible():
+                self.loading.hide()
+        else:
+            # устройство исчезло
+            if self.main:
+                self.main.update_connection_status(False)
+            if not self.loading.isVisible():
+                self.loading.show()
+
+    def _launch_main_window(self):
+        self.main = MainWindow()
+
+        # перенаправляем сигналы сразу в интерфейс
+        self.serial_worker.data_received.connect(self.main.display_data)
+        self.serial_worker.error_occurred.connect(self.main.display_error)
+        self.serial_worker.connection_status.connect(self.main.update_connection_status)
+
+        self.main.show()
+
+    # ----------  корректное закрытие  ----------
+    def _stop_serial_thread(self):
         if self.serial_worker:
             self.serial_worker.stop()
         if self.serial_thread:
             self.serial_thread.quit()
             self.serial_thread.wait()
 
-        self.serial_worker = None
-        self.serial_thread = None
-
-
     def run(self):
-        sys.exit(self.app.exec_())
+        exit_code = self.qt_app.exec_()
+        self._stop_serial_thread()
+        sys.exit(exit_code)
+
+
+# ------------------------------  точка входа  ------------------------------
+if __name__ == "__main__":
+    App().run()
