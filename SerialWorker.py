@@ -42,6 +42,7 @@ class SerialWorker(QObject):
         for name, raw in zip(fields, dt4):
             prot[name] = struct.unpack('<f', raw)[0] if name != "TMNrpm" else int.from_bytes(raw, 'little')
 
+        print(len(prot), prot)
         self.data_received.emit(prot)
 
     def parse_error_packet(self):
