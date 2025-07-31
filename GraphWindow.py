@@ -1,6 +1,4 @@
 from main_imports import *
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 
 class GraphPanel(QWidget):
     def __init__(self):

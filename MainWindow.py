@@ -2,9 +2,7 @@ from PyQt5.QtCore import QThread
 from main_imports import *
 from ShematicWindow import *
 from GraphWindow import *
-from SerialWorker import SerialWorker          # <-- добавили
-# Если main_imports уже содержит QMessageBox ‒ удалите эту строку
-from PyQt5.QtWidgets import QMessageBox
+from SerialWorker import SerialWorker
 
 
 class EepromWindow(QWidget):
@@ -41,13 +39,25 @@ class EepromWindow(QWidget):
         self.table = QTableWidget()
         self.layout.addWidget(self.table)
 
-    def generate_table(self):
+    @pyqtSlot(list)
+    def handle_data(self, data_list: list):
+        self.table.setRowCount(len(data_list))
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Индекс", "0x", "dec"])
+
+        for i, val in enumerate(data_list):
+            self.table.setItem(i, 0, QTableWidgetItem(str(i)))
+            self.table.setItem(i, 1, QTableWidgetItem(hex(val)))
+            self.table.setItem(i, 2, QTableWidgetItem(str(val)))
+
+    def read_eeprom_command(self):
         try:
             start = int(self.start_input.text())
             end = int(self.end_input.text())
             if start > end:
                 raise ValueError("Начальный индекс должен быть меньше или равен конечному.")
         except ValueError:
+            logging.error("Необходимо ввести числа")
             self.start_input.setText("")
             self.end_input.setText("")
             self.start_input.setPlaceholderText("Ошибка: введите числа")
@@ -55,15 +65,11 @@ class EepromWindow(QWidget):
             return
 
         count = end - start + 1
-        self.table.setRowCount(count)
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Индекс", "Ox", "Od"])
+        cmd_id = 0x11  # команда чтения EEPROM
+        address = start
+        num_bytes = bytes([count])
+        self.send_eprom_command_signal.emit(cmd_id, address, num_bytes)
 
-        for i, index in enumerate(range(start, end + 1)):
-            # Ячейки редактируемые по умолчанию
-            self.table.setItem(i, 0, QTableWidgetItem(str(index)))
-            self.table.setItem(i, 1, QTableWidgetItem(str(random.randint(0, 100))))
-            self.table.setItem(i, 2, QTableWidgetItem(str(random.randint(0, 100))))
 
     def save_table(self):
         rows = self.table.rowCount()
@@ -133,12 +139,17 @@ class ConfigWidget(QWidget):
 
 
 class MainWindow(QWidget):
+    send_command_signal = pyqtSignal(int, bytes)
+    send_eprom_command_signal = pyqtSignal(int, int, bytes)
+    eeprom_data_signal = pyqtSignal(list)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SCADA NIIM")
         self.setGeometry(100, 100, 1280, 1024)
         self.setup_ui()
         self.mode = 0
+        self.error_box_open = False
 
     # ----------  UI  ----------
     def setup_ui(self):
@@ -203,29 +214,64 @@ class MainWindow(QWidget):
 
     # ----------  дополнительные окна  ----------
     def ReadEeprom(self):
-        self.w = EepromWindow(); self.w.show()
+        self.w = EepromWindow()
+        self.w.send_eprom_command_signal.connect(self.send_eprom_command_signal)
+        self.eeprom_data_signal.connect(self.w.handle_data)
+        self.w.show()
 
     def ReadConfig(self):
         self.w2 = ConfigWidget(); self.w2.show()
 
     # ----------  обратные вызовы от SerialWorker  ----------
     def display_data(self, data: dict):
+        if "EEPROM_READ" in data:
+            self.eeprom_data_signal.emit(data["EEPROM_READ"])
+            return
+
+
         # Пример ‒ обновляем графики
         self.graph_panel.update_plots([data.get("MIDA", 0),
                                        data.get("Magdischarge", 0),
                                        data.get("ThermalIndicator", 0)])
 
     def display_error(self, msg: str):
-        QMessageBox.critical(self, "Ошибка связи", msg)
+        if self.error_box_open:
+            return  # Уже показывается окно — не дублируем
+
+        self.error_box_open = True
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Ошибка связи")
+        box.setText(msg)
+        box.setIcon(QMessageBox.Critical)
+        box.setStandardButtons(QMessageBox.Ok)
+
+        # Сброс флага, когда окно закрывается
+        box.buttonClicked.connect(lambda _: setattr(self, 'error_box_open', False))
+        logging.error("Ошибка связи: " + msg)
+        box.show()
 
     def update_connection_status(self, connected: bool):
         postfix = " (подключено)" if connected else " (нет подключения)"
-        self.setWindowTitle("SCADA NIIM" + postfix)
+        self.setWindowTitle("UdavProg" + postfix)
 
     # ----------  пользовательские действия  ----------
     def toggle_valve(self, name: str):
-        self.schematic.toggle_valve(name)
         self.graph_panel.mark_event()
+
+        valve_id = {
+            "V1": 1,
+            "V2": 2,
+            "V3": 3,
+            "V4": 4,
+            "V5": 5,
+            "V8": 8
+        }.get(name, 0)
+
+        if valve_id:
+            cmd_id = 0x01
+            payload = bytes([valve_id])
+            self.send_command_signal.emit(cmd_id, payload)
 
 # ------------------------------------------------------------------------------------------------
 #                                          Приложение
@@ -240,7 +286,6 @@ class LoadingWindow(QWidget):
 
 
 class App:
-    """Контролирует окна и поток SerialWorker."""
     def __init__(self):
         self.qt_app = QApplication(sys.argv)
 
@@ -254,7 +299,7 @@ class App:
         self.serial_worker.moveToThread(self.serial_thread)
 
         # сигналы
-        self.serial_thread.started.connect(self.serial_worker.run)
+        self.serial_thread.started.connect(self.serial_worker.run_input)
         self.serial_worker.connection_status.connect(self._on_connection_status)
 
         self.serial_thread.start()
